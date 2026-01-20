@@ -1,12 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import api from '../api';
-import { Upload, FileText, Check, Loader2, Eye } from 'lucide-react';
+import { Upload, FileText, Check, Loader2, Eye, AlertCircle } from 'lucide-react';
 import PDFModal from './PDFModal';
 
 export default function FileUpload({ onUploadComplete, initialPath, label }) {
     const [uploading, setUploading] = useState(false);
     const [filePath, setFilePath] = useState(initialPath || '');
     const [showModal, setShowModal] = useState(false);
+    const [isConfirmed, setIsConfirmed] = useState(!!initialPath); // If initialPath exists, consider it pre-confirmed
+    const [pendingFilePath, setPendingFilePath] = useState(null); // File uploaded but not yet confirmed
+
+    // Reset confirmed state when initialPath changes externally
+    useEffect(() => {
+        if (initialPath) {
+            setFilePath(initialPath);
+            setIsConfirmed(true);
+            setPendingFilePath(null);
+        }
+    }, [initialPath]);
 
     // Handle File Selection
     const handleFileChange = async (e) => {
@@ -27,10 +38,11 @@ export default function FileUpload({ onUploadComplete, initialPath, label }) {
             const res = await api.post('/upload', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
-            setFilePath(res.data.filePath);
-            if (onUploadComplete) {
-                onUploadComplete(res.data.filePath);
-            }
+            // Store as pending until confirmed
+            setPendingFilePath(res.data.filePath);
+            setIsConfirmed(false);
+            // Automatically open preview modal for mandatory preview
+            setShowModal(true);
         } catch (error) {
             console.error('Upload failed:', error);
             alert('File upload failed. Please try again.');
@@ -39,12 +51,39 @@ export default function FileUpload({ onUploadComplete, initialPath, label }) {
         }
     };
 
+    // Handle confirmation after preview
+    const handleConfirm = () => {
+        if (pendingFilePath) {
+            setFilePath(pendingFilePath);
+            setIsConfirmed(true);
+            setShowModal(false);
+            // Now call the callback to notify parent component
+            if (onUploadComplete) {
+                onUploadComplete(pendingFilePath);
+            }
+            setPendingFilePath(null);
+        }
+    };
+
+    // Handle cancel/reject - remove the uploaded file
+    const handleCancel = () => {
+        setShowModal(false);
+        setPendingFilePath(null);
+        setIsConfirmed(false);
+        // Reset file input
+        const fileInput = document.querySelector('input[type="file"]');
+        if (fileInput) fileInput.value = '';
+    };
+
     const getFullUrl = (path) => {
         if (!path) return '';
         if (path.startsWith('http')) return path;
         const baseUrl = api.defaults.baseURL.replace('/api', '');
         return `${baseUrl}/${path}`;
     };
+
+    // Determine which file URL to show in modal (pending or confirmed)
+    const modalFileUrl = pendingFilePath ? getFullUrl(pendingFilePath) : getFullUrl(filePath);
 
     return (
         <div className="mb-4">
@@ -66,11 +105,18 @@ export default function FileUpload({ onUploadComplete, initialPath, label }) {
                     </div>
                 </div>
 
-                {/* Status / View Link */}
-                {filePath && (
+                {/* Status Indicators */}
+                {pendingFilePath && !isConfirmed && (
+                    <div className="flex items-center text-amber-600 bg-amber-50 px-3 py-1.5 rounded-md border border-amber-200 animate-in fade-in">
+                        <AlertCircle size={16} className="mr-1.5" />
+                        <span className="text-xs font-semibold">Preview Required</span>
+                    </div>
+                )}
+
+                {filePath && isConfirmed && (
                     <div className="flex items-center text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-md border border-emerald-100 animate-in fade-in">
                         <Check size={16} className="mr-1.5" />
-                        <span className="text-xs font-semibold mr-3">Uploaded</span>
+                        <span className="text-xs font-semibold mr-3">Confirmed</span>
 
                         <button
                             type="button"
@@ -83,14 +129,22 @@ export default function FileUpload({ onUploadComplete, initialPath, label }) {
                 )}
             </div>
 
-            {!filePath && (
+            {!filePath && !pendingFilePath && (
                 <p className="text-xs text-slate-400 mt-1 pl-1">Supported format: PDF only</p>
+            )}
+
+            {pendingFilePath && !isConfirmed && (
+                <p className="text-xs text-amber-600 mt-1 pl-1 font-medium">
+                    ⚠️ Please preview and confirm the document before submitting
+                </p>
             )}
 
             <PDFModal
                 isOpen={showModal}
-                onClose={() => setShowModal(false)}
-                fileUrl={getFullUrl(filePath)}
+                onClose={pendingFilePath ? handleCancel : () => setShowModal(false)}
+                fileUrl={modalFileUrl}
+                onConfirm={pendingFilePath ? handleConfirm : null}
+                isConfirmationMode={!!pendingFilePath}
             />
         </div>
     );
