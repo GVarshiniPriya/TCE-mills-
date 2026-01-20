@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Clock, CheckCircle, AlertTriangle, ArrowRight, Search, Edit3 } from 'lucide-react';
+import { FileText, Clock, CheckCircle, AlertTriangle, ArrowRight, Search, Edit3, ChevronRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export default function Dashboard() {
@@ -185,22 +185,36 @@ export default function Dashboard() {
                                 <td className="px-6 py-4 font-medium text-slate-900">{c.vendor_name}</td>
                                 <td className="px-6 py-4 text-slate-500 text-sm">{c.gst_number || '-'}</td>
                                 <td className="px-6 py-4">
-                                    <div className="flex items-center space-x-1">
+                                    <div className="flex items-center space-x-0.5">
                                         {[
                                             { id: 1, label: 'Contract' },
                                             { id: 2, label: 'Quality' },
                                             { id: 3, label: 'Sampling' },
                                             { id: 4, label: 'CTL' }, // Shortened for space
                                             { id: 5, label: 'Payment' }
-                                        ].map((step) => {
+                                        ].map((step, index, array) => {
                                             let colorClass = 'bg-slate-100 text-slate-400 border-slate-200'; // Future
                                             if (step.id < c.stage) colorClass = 'bg-emerald-100 text-emerald-700 border-emerald-200'; // Past
                                             if (step.id === c.stage) colorClass = 'bg-rose-100 text-rose-700 border-rose-200 ring-1 ring-rose-200 font-bold'; // Current
 
                                             return (
-                                                <div key={step.id} className={`px-2 py-1 rounded text-[10px] uppercase tracking-wide border ${colorClass}`}>
-                                                    {step.label}
-                                                </div>
+                                                <React.Fragment key={step.id}>
+                                                    <div className={`px-2 py-1 rounded text-[10px] uppercase tracking-wide border ${colorClass}`}>
+                                                        {step.label}
+                                                    </div>
+                                                    {index < array.length - 1 && (
+                                                        <ChevronRight 
+                                                            size={14} 
+                                                            className={`mx-0.5 ${
+                                                                step.id < c.stage 
+                                                                    ? 'text-emerald-500' 
+                                                                    : step.id === c.stage 
+                                                                    ? 'text-rose-500' 
+                                                                    : 'text-slate-300'
+                                                            }`} 
+                                                        />
+                                                    )}
+                                                </React.Fragment>
                                             );
                                         })}
                                     </div>
