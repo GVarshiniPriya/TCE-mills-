@@ -19,7 +19,8 @@ export default function Stage5_Payment() {
         invoice_number: '', invoice_weight: '',
         invoice_value: '', tds_amount: '0', cash_discount: '0', net_amount_paid: '',
         bank_name: '', branch: '', account_no: '', ifsc_code: '',
-        payment_mode: 'RTGS', rtgs_reference_no: ''
+        payment_mode: 'RTGS', rtgs_reference_no: '',
+        special_remarks: ''
     });
 
     const [approvalData, setApprovalData] = useState({ decision: 'Approve', remarks: '' });
@@ -118,7 +119,8 @@ export default function Stage5_Payment() {
                         account_no: foundLot.account_no || '',
                         ifsc_code: foundLot.ifsc_code || '',
                         payment_mode: foundLot.payment_mode || 'RTGS',
-                        rtgs_reference_no: foundLot.rtgs_reference_no || ''
+                        rtgs_reference_no: foundLot.rtgs_reference_no || '',
+                        special_remarks: foundLot.stage5_remarks || ''
                     });
                 }
             }
@@ -301,6 +303,17 @@ export default function Stage5_Payment() {
                                             </div>
                                         </div>
                                     </div>
+
+                                    <div>
+                                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 mt-4">Special Remarks</h4>
+                                        <textarea
+                                            name="special_remarks"
+                                            value={formData.special_remarks}
+                                            onChange={handleChange}
+                                            placeholder="Add any special remarks for this payment"
+                                            className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-lg p-3 min-h-[120px] focus:ring-2 focus:ring-indigo-500 transition-all"
+                                        />
+                                    </div>
                                 </form>
                             </>
                                 ) : (
@@ -336,6 +349,12 @@ export default function Stage5_Payment() {
                                                 <div className="text-slate-500 font-mono mt-2 pt-2 border-t border-slate-200">
                                                     {activeLot.account_no} &bull; {activeLot.ifsc_code}
                                                 </div>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Special Remarks</label>
+                                            <div className="p-4 bg-slate-50 rounded-lg border border-slate-100 text-sm text-slate-600 italic whitespace-pre-wrap">
+                                                {activeLot.stage5_remarks || 'No special remarks'}
                                             </div>
                                         </div>
                                     </div>

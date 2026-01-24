@@ -19,6 +19,7 @@ export default function Stage1_Create() {
 
     // Contract Form State
     const [formData, setFormData] = useState({
+        contract_id: '',
         vendor_id: '',
         cotton_type: '',
         quality: '',
@@ -57,6 +58,7 @@ export default function Stage1_Create() {
             const data = res.data;
             setContract(data);
             setFormData({
+                contract_id: data.contract_id,
                 vendor_id: data.vendor_id,
                 cotton_type: data.cotton_type,
                 quality: data.quality,
@@ -99,12 +101,21 @@ export default function Stage1_Create() {
     const submitContract = async (e) => {
         e.preventDefault();
         try {
-            // Filter empty params to keep DB clean, or send all. 
+            // Filter empty params to keep DB clean, or send all.
             // Sending as is allows user to see what they left blank if they edit later.
             const payload = { ...formData, params: showParams ? params : null };
 
-            await api.post('/contracts', payload);
-            navigate('/dashboard');
+            const response = await api.post('/contracts', payload);
+            const { contract_id, lot_id } = response.data;
+
+            // Check if vendor is privileged
+            const selectedVendor = vendors.find(v => v.vendor_id == formData.vendor_id);
+            if (selectedVendor && selectedVendor.is_privileged && lot_id) {
+                // Navigate directly to payment stage
+                navigate(`/contracts/${contract_id}/lots/${lot_id}/stage5`);
+            } else {
+                navigate('/dashboard');
+            }
         } catch (e) {
             alert('Error creating contract: ' + (e.response?.data?.message || e.message));
         }
@@ -329,6 +340,11 @@ export default function Stage1_Create() {
                         </div>
 
                         <div className="space-y-6 flex-grow">
+                            <div>
+                                <label className="block text-slate-600 mb-1.5 font-bold text-xs uppercase tracking-wide">Contract ID *</label>
+                                <input type="text" name="contract_id" placeholder="e.g. CON-001" value={formData.contract_id} onChange={handleContractChange} required className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-lg p-3 focus:ring-2 focus:ring-indigo-500 transition-all font-medium" />
+                            </div>
+
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-slate-600 mb-1.5 font-bold text-xs uppercase tracking-wide">Cotton Type</label>

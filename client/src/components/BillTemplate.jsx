@@ -75,7 +75,7 @@ const BillTemplate = ({ contract, lot, paymentData }) => {
 
                 {/* Instruction Line */}
                 <div className="mb-2 pl-1 text-[11px] italic">
-                    Kindly instruct us to remit... 100% PAYMENT to the following party on ...<span className="underline font-bold not-italic ml-2">{paymentDate}</span>
+                    Kindly instruct us to remit the payment to the following party on ...<span className="underline font-bold not-italic ml-2">{paymentDate}</span>
                 </div>
 
                 {/* Main Details Grid - Compact, No Flex Grow */}
@@ -111,8 +111,7 @@ const BillTemplate = ({ contract, lot, paymentData }) => {
                     {/* 3. Arrival Date */}
                     <div className="flex border-b border-black items-center py-0.5">
                         <div className="w-[180px] p-1.5 pl-3 border-r border-black shrink-0 font-bold bg-gray-50/30 self-stretch flex items-center">3. ARRIVAL DATE (at mills)</div>
-                        <div className="w-[150px] p-1.5 pl-4 border-r border-black shrink-0">{arrivalDate}</div>
-                        <div className="p-1.5 pl-4 font-bold">100% PAYMENT</div>
+                        <div className="p-1.5 pl-4">{arrivalDate}</div>
                     </div>
 
                     {/* 4. Variety */}
@@ -131,7 +130,7 @@ const BillTemplate = ({ contract, lot, paymentData }) => {
                     <div className="flex border-b border-black items-center py-0.5">
                         <div className="w-[180px] p-1.5 pl-3 border-r border-black shrink-0 font-bold bg-gray-50/30 self-stretch flex items-center">6. BALES</div>
                         <div className="w-[150px] p-1.5 pl-4 border-r border-black shrink-0">{contract?.quantity} BALES</div>
-                        <div className="w-[120px] p-1.5 pl-3 border-r border-black shrink-0 font-bold bg-gray-50/30 self-stretch flex items-center">7. NETT WEIGHT</div>
+                        <div className="w-[120px] p-1.5 pl-3 border-r border-black shrink-0 font-bold bg-gray-50/30 self-stretch flex items-center">7. NET WEIGHT</div>
                         <div className="p-1.5 pl-4">{paymentData?.invoice_weight} KGS</div>
                     </div>
 
@@ -182,7 +181,9 @@ const BillTemplate = ({ contract, lot, paymentData }) => {
                     {/* 10. Remarks */}
                     <div className="flex border-b border-black min-h-[40px]">
                         <div className="w-[180px] p-1.5 pl-3 border-r border-black shrink-0 pt-2 font-bold bg-gray-50/30">10.REMARKS</div>
-                        <div className="p-1.5 pl-4 pt-2 w-full break-all italic text-gray-600">{lot?.stage5_remarks || 'No Remarks'}</div>
+                        <div className="p-1.5 pl-4 pt-2 w-full break-all italic text-gray-600">
+                            {paymentData?.special_remarks || lot?.stage5_remarks || 'No Remarks'}
+                        </div>
                     </div>
 
                     {/* 11. Supplied To */}
@@ -226,7 +227,7 @@ const BillTemplate = ({ contract, lot, paymentData }) => {
                         <div className="w-[60%] border-r border-black p-2 flex flex-col justify-between">
                             <div className="text-gray-500 font-mono">01-284 -0402</div>
                             <div className="font-bold border-t-2 border-gray-300 mt-auto pt-1 text-[11px]">
-                                01-142 &nbsp;&nbsp;&nbsp; 100% PAYMENT {contract?.quantity} B/S {contract?.cotton_type} KVS LOT - {lot?.lot_number}
+                                01-142 &nbsp;&nbsp;&nbsp; PAYMENT {contract?.quantity} B/S {contract?.cotton_type} KVS LOT - {lot?.lot_number}
                             </div>
                         </div>
 

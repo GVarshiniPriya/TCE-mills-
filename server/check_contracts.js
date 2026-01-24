@@ -7,14 +7,13 @@ const db = new sqlite3.Database(dbPath, (err) => {
         console.error('Could not connect to database', err);
         return;
     }
-    console.log('Connected to SQLite database');
 });
 
-db.all("PRAGMA table_info(contracts)", [], (err, rows) => {
+db.all("SELECT contract_id, vendor_id FROM contracts", [], (err, rows) => {
     if (err) {
-        console.error("Error getting table info:", err);
+        console.error("Error fetching contracts:", err);
     } else {
-        console.log("Contracts Table Schema:");
+        console.log("Current Contracts in DB:");
         console.log(JSON.stringify(rows, null, 2));
     }
     db.close();

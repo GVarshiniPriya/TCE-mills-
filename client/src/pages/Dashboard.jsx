@@ -18,7 +18,7 @@ export default function Dashboard() {
 
     const fetchContracts = async () => {
         try {
-            const res = await api.get('/contracts');
+            const res = await api.get(`/contracts?t=${Date.now()}`);
             setContracts(res.data);
         } catch (e) {
             console.error(e);
@@ -61,8 +61,8 @@ export default function Dashboard() {
 
         if (filterStatus === 'action_required') {
             if (user?.role === 'Chairman') {
-                // Chairman only sees Approval tasks
-                matchesStatus = c.status.includes('Pending Chairman Approval');
+                // Chairman sees approval tasks AND privileged vendor payment entries
+                matchesStatus = c.status.includes('Pending Chairman Approval') || c.status.includes('Pending Payment Entry');
             } else {
                 // Manager sees everything NOT waiting for Chairman and NOT Closed/Approved
                 // Includes: Pending Entry, Sampling, Rollback, and Rejected (so they can act/see)
@@ -73,8 +73,8 @@ export default function Dashboard() {
         }
         else if (filterStatus === 'pending') {
             if (user?.role === 'Chairman') {
-                // For Chairman, 'All Pending' should NOT show 'Pending Entry' statuses
-                matchesStatus = c.status.includes('Pending Chairman Approval');
+                // For Chairman, show approval tasks AND privileged vendor payment entries
+                matchesStatus = c.status.includes('Pending Chairman Approval') || c.status.includes('Pending Payment Entry');
             } else {
                 // Manager sees 'Pending' and 'Rollback' as pending actions
                 matchesStatus = c.status.includes('Pending') || c.status.includes('Rollback');
@@ -83,15 +83,20 @@ export default function Dashboard() {
         else if (filterStatus === 'approved') matchesStatus = c.status.includes('Approved') || c.status === 'Closed';
         else if (filterStatus === 'rejected') matchesStatus = c.status.includes('Rejected'); // Rollback moved to Pending for clarity
 
-        return matchesSearch && matchesStatus;
+        // Chairman should not see rolled back contracts
+        const chairmanHidesRollback = !(user?.role === 'Chairman' && c.status.includes('Rollback'));
+
+        return matchesSearch && matchesStatus && chairmanHidesRollback;
     });
 
     // Stats Logic
     const stats = {
         total: contracts.length,
-        // Manager Pending includes Rollbacks
+        // Manager Pending includes Rollbacks, Chairman sees approval tasks AND privileged vendor payment entries
         pending: contracts.filter(c => {
-            if (user?.role === 'Chairman') return c.status.includes('Pending Chairman Approval');
+            if (user?.role === 'Chairman') {
+                return c.status.includes('Pending Chairman Approval') || c.status.includes('Pending Payment Entry');
+            }
             return c.status.includes('Pending') || c.status.includes('Rollback');
         }).length,
         completed: contracts.filter(c => c.status === 'Closed' || c.status.includes('Approved')).length,
@@ -219,9 +224,11 @@ export default function Dashboard() {
                                         })}
                                     </div>
                                     <div className="mt-1">
-                                        {/* Optional: Show status text below if it's special like "Rejected" */}
+                                        {/* Show warning for rolled back or rejected contracts */}
                                         {(c.status.includes('Rollback') || c.status.includes('Rejected')) && (
-                                            <span className="text-[10px] font-bold text-rose-600">⚠️ {c.status}</span>
+                                            <span className="text-[10px] font-bold text-rose-600">
+                                                ⚠️ {c.status.includes('Rollback') ? 'Rollback Requested' : c.status}
+                                            </span>
                                         )}
                                     </div>
                                 </td>

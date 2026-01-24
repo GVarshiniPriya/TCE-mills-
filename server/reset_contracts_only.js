@@ -29,7 +29,8 @@ const resetContractsOnly = async () => {
             'stage2_chairman_decision',
             'stage2_manager_report',
             'stage1_chairman_decision',
-            'contracts'
+            'contracts',
+            'vendors'
         ];
 
         for (const table of tables) {

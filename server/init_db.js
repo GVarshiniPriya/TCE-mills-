@@ -29,8 +29,9 @@ const initDb = async () => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-    CREATE TABLE IF NOT EXISTS contracts (
-        contract_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    DROP TABLE IF EXISTS contracts;
+    CREATE TABLE contracts (
+        contract_id TEXT PRIMARY KEY,
         vendor_id INTEGER,
         cotton_type TEXT,
         quality TEXT,
@@ -39,7 +40,7 @@ const initDb = async () => {
         document_path TEXT,
         entry_date DATE,
         entered_by INTEGER,
-        
+
         -- Quality Params (Stage 2/4)
         uhml REAL,
         ui REAL,
@@ -56,22 +57,24 @@ const initDb = async () => {
         moisture REAL,
         neps REAL,
         stability REAL,
-        
+
         stage1_params TEXT, -- JSON Storage for Optional Params
-        
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
+
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME
     );
 
-    CREATE TABLE IF NOT EXISTS stage1_chairman_decision (
-        contract_id INTEGER PRIMARY KEY,
+    DROP TABLE IF EXISTS stage1_chairman_decision;
+    CREATE TABLE stage1_chairman_decision (
+        contract_id TEXT PRIMARY KEY,
         decision TEXT,
         remarks TEXT,
         decision_date DATETIME
     );
 
-    CREATE TABLE IF NOT EXISTS stage2_manager_report (
-        contract_id INTEGER PRIMARY KEY,
+    DROP TABLE IF EXISTS stage2_manager_report;
+    CREATE TABLE stage2_manager_report (
+        contract_id TEXT PRIMARY KEY,
         variety TEXT,
         price REAL,
         report_date DATE,
@@ -97,25 +100,27 @@ const initDb = async () => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-    CREATE TABLE IF NOT EXISTS stage2_chairman_decision (
-        contract_id INTEGER PRIMARY KEY,
+    DROP TABLE IF EXISTS stage2_chairman_decision;
+    CREATE TABLE stage2_chairman_decision (
+        contract_id TEXT PRIMARY KEY,
         decision TEXT,
         remarks TEXT,
         decided_by INTEGER,
         decision_date DATETIME
     );
 
-    CREATE TABLE IF NOT EXISTS contract_lots (
+    DROP TABLE IF EXISTS contract_lots;
+    CREATE TABLE contract_lots (
         lot_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        contract_id INTEGER,
-        
+        contract_id TEXT,
+
         -- Stage 3: Sampling
         lot_number TEXT,
         arrival_date DATE,
         sequence_start TEXT,
         sequence_end TEXT,
         no_of_samples INTEGER,
-        
+
         -- Stage 4: CTS
         mic_value REAL,
         strength REAL,
@@ -135,7 +140,7 @@ const initDb = async () => {
         report_document_path TEXT,
         trash_percent_samples TEXT, -- JSON
         stage4_remarks TEXT,
-        
+
         -- Stage 5: Payment
         invoice_value REAL,
         tds_amount REAL,
@@ -150,11 +155,12 @@ const initDb = async () => {
         invoice_number TEXT,
         invoice_weight REAL,
         stage5_remarks TEXT,
-        
+
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-    CREATE TABLE IF NOT EXISTS lot_decisions (
+    DROP TABLE IF EXISTS lot_decisions;
+    CREATE TABLE lot_decisions (
         decision_id INTEGER PRIMARY KEY AUTOINCREMENT,
         lot_id INTEGER,
         stage_number INTEGER, -- 4 or 5
@@ -164,9 +170,10 @@ const initDb = async () => {
         decision_date DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-    CREATE TABLE IF NOT EXISTS stage_history (
+    DROP TABLE IF EXISTS stage_history;
+    CREATE TABLE stage_history (
         history_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        contract_id INTEGER NOT NULL,
+        contract_id TEXT NOT NULL,
         lot_id INTEGER NULL, -- Added Lot ID link
         stage_number INTEGER NULL,
         action TEXT NULL,
@@ -246,6 +253,8 @@ const initDb = async () => {
 
         await seedUserSafe('manager', 'Manager', managerHash);
         await seedUserSafe('chairman', 'Chairman', chairmanHash);
+
+        // No vendors seeded - user can add through UI
 
         console.log("Done.");
 

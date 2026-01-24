@@ -3,21 +3,46 @@ const router = express.Router();
 const { run, query, get } = require('../db');
 const { authenticateToken } = require('../middleware/auth.middleware');
 
+// --- Vendors Routes ---
+router.get('/vendors', authenticateToken, async (req, res) => {
+    try {
+        const vendors = await query("SELECT * FROM vendors ORDER BY vendor_name");
+        res.json(vendors);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+router.post('/vendors', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'Manager') return res.status(403).json({ message: "Manager only" });
+    const { vendor_name, gst_number, state, email, phone_number, address, is_privileged } = req.body;
+
+    try {
+        const result = await run(
+            `INSERT INTO vendors (vendor_name, gst_number, state, email, phone_number, address, is_privileged) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [vendor_name, gst_number, state, email, phone_number, address, is_privileged ? 1 : 0]
+        );
+        res.json({ message: "Vendor created", vendor_id: result.lastID });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // --- Helper: Determine Stage & Status ---
 const determineStageStatus = async (contract, lot) => {
     // If no lot exists yet, check Contract-Level stages (1 & 2)
     if (!lot) {
         // Stage 2 Manager Decision?? No, Stage 2 is "Quality Entry" (Contract Level)
         const s2 = await get("SELECT * FROM stage2_chairman_decision WHERE contract_id = ?", [contract.contract_id]);
-        if (s2 && s2.decision === 'Approve') return { stage: 3, status: "Pending Sampling" };
-        if (s2 && s2.decision === 'Reject') return { stage: 2, status: "Stage 2 Rejected" };
+        if (s2 && s2.decision.toLowerCase() === 'approve') return { stage: 3, status: "Pending Sampling" };
+        if (s2 && s2.decision.toLowerCase() === 'reject') return { stage: 2, status: "Stage 2 Rejected" };
 
         const s2m = await get("SELECT * FROM stage2_manager_report WHERE contract_id = ?", [contract.contract_id]);
         if (s2m) return { stage: 2, status: "Pending Chairman Approval" };
 
         const s1 = await get("SELECT * FROM stage1_chairman_decision WHERE contract_id = ?", [contract.contract_id]);
-        if (s1 && s1.decision === 'Approve') return { stage: 2, status: "Pending Quality Entry" };
-        if (s1 && s1.decision === 'Reject') return { stage: 1, status: "Stage 1 Rejected" };
+        if (s1 && s1.decision.toLowerCase() === 'approve') return { stage: 2, status: "Pending Quality Entry" };
+        if (s1 && s1.decision.toLowerCase() === 'reject') return { stage: 1, status: "Stage 1 Rejected" };
 
         return { stage: 1, status: "Pending Chairman Approval" }; // Default S1
     }
@@ -25,16 +50,23 @@ const determineStageStatus = async (contract, lot) => {
     // LOT EXIST: Check Lot-Level Stages (3, 4, 5)
     // Lot Decisions
     const s5d = await get("SELECT * FROM lot_decisions WHERE lot_id = ? AND stage_number = 5", [lot.lot_id]);
-    if (s5d && s5d.decision === 'Approve') return { stage: 6, status: 'Closed' };
+    if (s5d && s5d.decision.toLowerCase() === 'approve') return { stage: 6, status: 'Approved' };
     if (s5d && s5d.decision === 'Modify') return { stage: 5, status: 'Rollback Requested' };
     if (s5d && s5d.decision === 'Reject') return { stage: 5, status: 'Stage 5 Rejected' };
+
+    // Check if vendor is privileged
+    const vendor = await get("SELECT is_privileged FROM vendors WHERE vendor_id = (SELECT vendor_id FROM contracts WHERE contract_id = ?)", [contract.contract_id]);
+    if (vendor && vendor.is_privileged) {
+        if (lot.net_amount_paid) return { stage: 5, status: "Pending Chairman Approval" };
+        return { stage: 5, status: "Pending Payment Entry" };
+    }
 
     // Stage 5 Payment Entry
     if (lot.net_amount_paid) return { stage: 5, status: "Pending Chairman Approval" };
 
     const s4d = await get("SELECT * FROM lot_decisions WHERE lot_id = ? AND stage_number = 4", [lot.lot_id]);
-    if (s4d && s4d.decision === 'Approve') return { stage: 5, status: "Pending Payment Entry" };
-    if (s4d && s4d.decision === 'Reject') return { stage: 4, status: 'Stage 4 Rejected' };
+    if (s4d && s4d.decision.toLowerCase() === 'approve') return { stage: 5, status: "Pending Payment Entry" };
+    if (s4d && s4d.decision.toLowerCase() === 'reject') return { stage: 4, status: 'Stage 4 Rejected' };
 
     // Stage 4 CTS Entry (Check if mic_value is present)
     if (lot.mic_value != null) return { stage: 4, status: "Pending Chairman Approval" };
@@ -62,24 +94,35 @@ router.get('/contracts', authenticateToken, async (req, res) => {
         const rows = await query(sql);
 
         const processed = await Promise.all(rows.map(async (row) => {
-            // Separate Contract and Lot data for helper
-            const contractData = { contract_id: row.contract_id };
-            const lotData = row.lot_id ? {
-                lot_id: row.lot_id,
-                mic_value: row.mic_value,
-                net_amount_paid: row.net_amount_paid
-            } : null;
+            try {
+                // Separate Contract and Lot data for helper
+                const contractData = { contract_id: row.contract_id };
+                const lotData = row.lot_id ? {
+                    lot_id: row.lot_id,
+                    mic_value: row.mic_value,
+                    net_amount_paid: row.net_amount_paid
+                } : null;
 
-            const statusObj = await determineStageStatus(contractData, lotData);
+                const statusObj = await determineStageStatus(contractData, lotData);
 
-            if (row.stage1_params) {
-                try { row.stage1_params = JSON.parse(row.stage1_params); } catch (e) { }
+                if (row.stage1_params) {
+                    try { row.stage1_params = JSON.parse(row.stage1_params); } catch (e) { }
+                }
+
+                const item = { ...row, ...statusObj };
+
+                // Return all contracts for both roles - frontend handles filtering
+                return item;
+            } catch (e) {
+                console.error('Error processing contract', row.contract_id, e);
+                return null;
             }
-
-            return { ...row, ...statusObj };
         }));
 
-        res.json(processed);
+        const filtered = processed.filter(item => item != null);
+        console.log(`Returning ${filtered.length} contracts for user ${req.user?.role || 'unknown'}`);
+        console.log('Sample contract statuses:', filtered.slice(0, 3).map(c => ({ id: c.contract_id, status: c.status })));
+        res.json(filtered);
     } catch (e) {
         console.error(e);
         res.status(500).json({ error: e.message });
@@ -134,24 +177,96 @@ router.get('/contracts/:id', authenticateToken, async (req, res) => {
 router.post('/contracts', authenticateToken, async (req, res) => {
     if (req.user.role !== 'Manager') return res.status(403).json({ message: "Manager only" });
 
-    const { vendor_id, cotton_type, quality, quantity, price, document_path, entry_date, params } = req.body;
+    const { contract_id, vendor_id, cotton_type, quality, quantity, price, document_path, entry_date, params } = req.body;
     const entered_by = req.user.user_id;
 
     try {
+        const parsedQuantity = parseFloat(quantity) || 0;
+        const parsedPrice = parseFloat(price) || 0;
+        const parsedVendorId = parseInt(vendor_id);
+        const parsedContractId = contract_id;
         const stage1_params = params ? JSON.stringify(params) : null;
+        console.log('Creating contract with:', { parsedContractId, parsedVendorId, cotton_type, quality, parsedQuantity, parsedPrice, document_path, entry_date, entered_by, stage1_params });
+        console.log('Types:', { contract_id: typeof contract_id, parsedContractId: typeof parsedContractId, parsedVendorId: typeof parsedVendorId, parsedQuantity: typeof parsedQuantity, parsedPrice: typeof parsedPrice });
 
         const result = await run(
-            `INSERT INTO contracts (vendor_id, cotton_type, quality, quantity, price, document_path, entry_date, entered_by, stage1_params) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [vendor_id, cotton_type, quality, quantity, price, document_path, entry_date, entered_by, stage1_params]
+            `INSERT INTO contracts (contract_id, vendor_id, cotton_type, quality, quantity, price, document_path, entry_date, entered_by, stage1_params)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [parsedContractId, parsedVendorId, cotton_type, quality, parsedQuantity, parsedPrice, document_path, entry_date, entered_by, stage1_params]
         );
 
-        const newContractId = result.lastID;
+        console.log('Contract inserted:', result);
+
+        const newContractId = parsedContractId;
 
         await run(`INSERT INTO stage_history (contract_id, stage_number, action, performed_by, remarks) VALUES (?, ?, ?, ?, ?)`,
             [newContractId, 1, 'Created', entered_by, 'Contract Created']);
 
-        res.json({ message: "Contract created", contract_id: newContractId });
+        let newLotId = null;
+
+        // Check if vendor is privileged
+        const vendor = await get("SELECT is_privileged FROM vendors WHERE vendor_id = ?", [parsedVendorId]);
+        if (vendor && vendor.is_privileged) {
+            // Auto-complete stages 1-4 for privileged vendor
+            // Stage 1: Chairman Decision - Approve
+            await run(`INSERT INTO stage1_chairman_decision (contract_id, decision, remarks, decision_date)
+                VALUES (?, 'Approve', 'Auto-approved for privileged vendor', CURRENT_TIMESTAMP)`,
+                [newContractId]);
+
+            await run(`INSERT INTO stage_history (contract_id, stage_number, action, performed_by, remarks) VALUES (?, ?, ?, ?, ?)`,
+                [newContractId, 1, 'Approve', 2, 'Auto-approved for privileged vendor']); // user_id 2 for chairman
+
+            // Stage 2: Manager Quality Entry (use defaults or from params)
+            const defaultQuality = {
+                uhml: 0, ui: 0, strength: 0, elongation: 0, mic: 0, rd: 0, plus_b: 0, sfi: 0, mat: 0, sci: 0
+            };
+            await run(`INSERT INTO stage2_manager_report
+                (contract_id, report_date, uhml, ui, strength, elongation, mic, rd, plus_b, sfi, mat, sci, entered_by, remarks, uploaded_at)
+                VALUES (?, CURRENT_DATE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Auto-entered for privileged vendor', CURRENT_TIMESTAMP)`,
+                [newContractId, defaultQuality.uhml, defaultQuality.ui, defaultQuality.strength, defaultQuality.elongation,
+                 defaultQuality.mic, defaultQuality.rd, defaultQuality.plus_b, defaultQuality.sfi, defaultQuality.mat, defaultQuality.sci, entered_by]);
+
+            await run(`INSERT INTO stage_history (contract_id, stage_number, action, performed_by, remarks) VALUES (?, ?, ?, ?, ?)`,
+                [newContractId, 2, 'Quality Entry', entered_by, 'Auto-entered for privileged vendor']);
+
+            // Stage 2: Chairman Decision - Approve
+            await run(`INSERT INTO stage2_chairman_decision (contract_id, decision, remarks, decided_by, decision_date)
+                VALUES (?, 'Approve', 'Auto-approved for privileged vendor', 2, CURRENT_TIMESTAMP)`,
+                [newContractId]);
+
+            await run(`INSERT INTO stage_history (contract_id, stage_number, action, performed_by, remarks) VALUES (?, ?, ?, ?, ?)`,
+                [newContractId, 2, 'Approve', 2, 'Auto-approved for privileged vendor']);
+
+            // Stage 3: Create default lot
+            const lotResult = await run(`INSERT INTO contract_lots (contract_id, lot_number, arrival_date, sequence_start, sequence_end, no_of_samples)
+                VALUES (?, '-', CURRENT_DATE, '1', '1', 1)`,
+                [newContractId]);
+
+            newLotId = lotResult.lastID;
+
+            await run(`INSERT INTO stage_history (contract_id, lot_id, stage_number, action, performed_by, remarks) VALUES (?, ?, ?, ?, ?, ?)`,
+                [newContractId, newLotId, 3, 'Sampling Entry', entered_by, 'Auto-created lot for privileged vendor']);
+
+            // Stage 4: CTS Entry (use defaults)
+            await run(`UPDATE contract_lots SET
+                mic_value=0, strength=0, uhml=0, ui_percent=0, sfi=0, elongation=0, rd=0, plus_b=0, colour_grade='AUTO', mat=0, sci=0, trash_percent=0, moisture_percent=0,
+                test_date=CURRENT_DATE, confirmation_date=CURRENT_DATE, stage4_remarks='Auto-entered for privileged vendor'
+                WHERE lot_id=?`,
+                [newLotId]);
+
+            await run(`INSERT INTO stage_history (contract_id, lot_id, stage_number, action, performed_by, remarks) VALUES (?, ?, ?, ?, ?, ?)`,
+                [newContractId, newLotId, 4, 'CTS Entry', entered_by, 'Auto-entered for privileged vendor']);
+
+            // Stage 4: Chairman Decision - Approve
+            await run(`INSERT INTO lot_decisions (lot_id, stage_number, decision, remarks, decided_by, decision_date)
+                VALUES (?, 4, 'Approve', 'Auto-approved for privileged vendor', 2, CURRENT_TIMESTAMP)`,
+                [newLotId]);
+
+            await run(`INSERT INTO stage_history (contract_id, lot_id, stage_number, action, performed_by, remarks) VALUES (?, ?, ?, ?, ?, ?)`,
+                [newContractId, newLotId, 4, 'Approve', 2, 'Auto-approved for privileged vendor']);
+        }
+
+        res.json({ message: "Contract created", contract_id: newContractId, lot_id: newLotId });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -277,6 +392,7 @@ router.post('/contracts/:id/stage3', authenticateToken, async (req, res) => {
 router.post('/contracts/:id/lots/:lotId/stage4', authenticateToken, async (req, res) => {
     if (req.user.role !== 'Manager') return res.status(403).json({ message: "Manager only" });
     const { id, lotId } = req.params;
+    const lotIdInt = parseInt(lotId);
     const {
         mic_value, strength, uhml, ui_percent, sfi, elongation, rd, plus_b, colour_grade, mat, sci, trash_percent, moisture_percent,
         test_date, confirmation_date, remarks, report_document_path, trash_percent_samples
@@ -303,15 +419,16 @@ router.post('/contracts/:id/lots/:lotId/stage4', authenticateToken, async (req, 
 router.post('/contracts/:id/lots/:lotId/stage4/decision', authenticateToken, async (req, res) => {
     if (req.user.role !== 'Chairman') return res.status(403).json({ message: "Chairman only" });
     const { id, lotId } = req.params;
+    const lotIdInt = parseInt(lotId);
     const { decision, remarks } = req.body;
 
     try {
-        await run(`INSERT INTO lot_decisions (lot_id, stage_number, decision, remarks, decided_by, decision_date) 
+        await run(`INSERT INTO lot_decisions (lot_id, stage_number, decision, remarks, decided_by, decision_date)
             VALUES (?, 4, ?, ?, ?, CURRENT_TIMESTAMP)`,
-            [lotId, decision, remarks, req.user.user_id]);
+            [lotIdInt, decision, remarks, req.user.user_id]);
 
         await run(`INSERT INTO stage_history (contract_id, lot_id, stage_number, action, performed_by, remarks) VALUES (?, ?, ?, ?, ?, ?)`,
-            [id, lotId, 4, decision, req.user.user_id, remarks]);
+            [id, lotIdInt, 4, decision, req.user.user_id, remarks]);
 
         res.json({ message: "Stage 4 Decision Saved" });
     } catch (e) {
@@ -323,11 +440,24 @@ router.post('/contracts/:id/lots/:lotId/stage4/decision', authenticateToken, asy
 router.post('/contracts/:id/lots/:lotId/stage5', authenticateToken, async (req, res) => {
     if (req.user.role !== 'Manager') return res.status(403).json({ message: "Manager only" });
     const { id, lotId } = req.params;
-    const { invoice_value, tds_amount, cash_discount, net_amount_paid, bank_name, branch, account_no, ifsc_code, payment_mode, rtgs_reference_no } = req.body;
+    const lotIdInt = parseInt(lotId);
+    const {
+        invoice_value,
+        tds_amount,
+        cash_discount,
+        net_amount_paid,
+        bank_name,
+        branch,
+        account_no,
+        ifsc_code,
+        payment_mode,
+        rtgs_reference_no,
+        special_remarks
+    } = req.body;
 
     try {
-        await run(`UPDATE contract_lots SET 
-            invoice_value=?, tds_amount=?, cash_discount=?, net_amount_paid=?, bank_name=?, branch=?, account_no=?, ifsc_code=?, payment_mode=?, rtgs_reference_no=?, invoice_number=?, invoice_weight=?
+        await run(`UPDATE contract_lots SET
+            invoice_value=?, tds_amount=?, cash_discount=?, net_amount_paid=?, bank_name=?, branch=?, account_no=?, ifsc_code=?, payment_mode=?, rtgs_reference_no=?, invoice_number=?, invoice_weight=?, stage5_remarks=?
             WHERE lot_id=? AND contract_id=?`,
             [
                 invoice_value || 0,
@@ -342,14 +472,15 @@ router.post('/contracts/:id/lots/:lotId/stage5', authenticateToken, async (req, 
                 rtgs_reference_no || '',
                 req.body.invoice_number || '',
                 req.body.invoice_weight || null,
-                lotId, id
+                special_remarks || '',
+                lotIdInt, id
             ]);
 
         await run(`INSERT INTO stage_history (contract_id, lot_id, stage_number, action, performed_by, remarks) VALUES (?, ?, ?, ?, ?, ?)`,
-            [id, lotId, 5, 'Payment Entry', req.user.user_id, 'Payment requisition entered for Lot']);
+            [id, lotIdInt, 5, 'Payment Entry', req.user.user_id, 'Payment requisition entered for Lot']);
 
         // Reset Decision if Rollback happened
-        await run("DELETE FROM lot_decisions WHERE lot_id = ? AND stage_number = 5", [lotId]);
+        await run("DELETE FROM lot_decisions WHERE lot_id = ? AND stage_number = 5", [lotIdInt]);
 
         res.json({ message: "Stage 5 Data Saved" });
     } catch (e) {
@@ -361,15 +492,16 @@ router.post('/contracts/:id/lots/:lotId/stage5', authenticateToken, async (req, 
 router.post('/contracts/:id/lots/:lotId/stage5/decision', authenticateToken, async (req, res) => {
     if (req.user.role !== 'Chairman') return res.status(403).json({ message: "Chairman only" });
     const { id, lotId } = req.params;
+    const lotIdInt = parseInt(lotId);
     const { decision, remarks } = req.body;
 
     try {
-        await run(`INSERT INTO lot_decisions (lot_id, stage_number, decision, remarks, decided_by, decision_date) 
+        await run(`INSERT INTO lot_decisions (lot_id, stage_number, decision, remarks, decided_by, decision_date)
             VALUES (?, 5, ?, ?, ?, CURRENT_TIMESTAMP)`,
-            [lotId, decision, remarks, req.user.user_id]);
+            [lotIdInt, decision, remarks, req.user.user_id]);
 
         await run(`INSERT INTO stage_history (contract_id, lot_id, stage_number, action, performed_by, remarks) VALUES (?, ?, ?, ?, ?, ?)`,
-            [id, lotId, 5, decision, req.user.user_id, remarks]);
+            [id, lotIdInt, 5, decision, req.user.user_id, remarks]);
 
         res.json({ message: "Stage 5 Decision Saved" });
     } catch (e) {
