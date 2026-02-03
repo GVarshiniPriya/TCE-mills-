@@ -30,17 +30,15 @@ router.post('/vendors', authenticateToken, async (req, res) => {
 
 // --- Helper: Determine Stage & Status ---
 const determineStageStatus = async (contract, lot) => {
-    // Check if vendor is privileged
-    const vendor = await get("SELECT is_privileged FROM vendors WHERE vendor_id = (SELECT vendor_id FROM contracts WHERE contract_id = ?)", [contract.contract_id]);
-    if (vendor && vendor.is_privileged) {
-        // For privileged vendors, if lot exists and has payment data, it's pending chairman approval
-        if (lot && lot.net_amount_paid) return { stage: 5, status: "Pending Chairman Approval" };
-        // Otherwise it's pending payment entry
-        return { stage: 5, status: "Pending Payment Entry" };
-    }
-
     // If no lot exists yet, check Contract-Level stages (1 & 2)
     if (!lot) {
+        // Check if vendor is privileged for contract-level decisions
+        const vendorInfo = await get("SELECT is_privileged FROM vendors WHERE vendor_id = (SELECT vendor_id FROM contracts WHERE contract_id = ?)", [contract.contract_id]);
+        if (vendorInfo && vendorInfo.is_privileged) {
+            // For privileged vendors, contract stages are auto-approved
+            return { stage: 5, status: "Pending Payment Entry" };
+        }
+
         // Stage 2 Manager Decision?? No, Stage 2 is "Quality Entry" (Contract Level)
         const s2 = await get("SELECT * FROM stage2_chairman_decision WHERE contract_id = ?", [contract.contract_id]);
         if (s2 && s2.decision.toLowerCase() === 'approve') return { stage: 3, status: "Pending Sampling" };
@@ -57,21 +55,35 @@ const determineStageStatus = async (contract, lot) => {
     }
 
     // LOT EXIST: Check Lot-Level Stages (3, 4, 5)
-    // Lot Decisions
-    const s5d = await get("SELECT * FROM lot_decisions WHERE lot_id = ? AND stage_number = 5", [lot.lot_id]);
-    if (s5d && s5d.decision.toLowerCase() === 'approve') return { stage: 6, status: 'Approved' };
-    if (s5d && s5d.decision === 'Modify') return { stage: 5, status: 'Rollback Requested' };
-    if (s5d && s5d.decision === 'Reject') return { stage: 5, status: 'Stage 5 Rejected' };
-
-    // Check if vendor is privileged
-    const vendor = await get("SELECT is_privileged FROM vendors WHERE vendor_id = (SELECT vendor_id FROM contracts WHERE contract_id = ?)", [contract.contract_id]);
-    if (vendor && vendor.is_privileged) {
-        if (lot.net_amount_paid) return { stage: 5, status: "Pending Chairman Approval" };
-        return { stage: 5, status: "Pending Payment Entry" };
+    // Stage 5 Payment Entry (for both privileged and non-privileged vendors)
+    if (lot.net_amount_paid) {
+        // Check if there's a decision for this stage FIRST (before any vendor logic)
+        const s5d = await get("SELECT * FROM lot_decisions WHERE lot_id = ? AND stage_number = 5", [lot.lot_id]);
+        if (s5d) {
+            console.log(`Found S5 Decision: ${s5d.decision} for lot ${lot.lot_id}`);
+            if (s5d.decision === 'Modify') {
+                // Check if manager has resubmitted after rollback (has invoice_number)
+                if (lot.invoice_number) {
+                    console.log(`Returning Pending Chairman Approval - invoice_number exists: ${lot.invoice_number}`);
+                    return { stage: 5, status: "Pending Chairman Approval" };
+                } else {
+                    console.log(`Returning Rollback Requested - no invoice_number`);
+                    return { stage: 5, status: 'Rollback Requested' };
+                }
+            }
+            if (s5d.decision === 'Reject') {
+                console.log(`Returning Stage 5 Rejected for lot ${lot.lot_id}`);
+                return { stage: 5, status: 'Stage 5 Rejected' };
+            }
+            if (s5d.decision === 'Approve') return { stage: 6, status: 'Approved' };
+        }
+        // Check if payment was actually submitted (has invoice_number)
+        if (lot.invoice_number) {
+            return { stage: 5, status: "Pending Chairman Approval" };
+        } else {
+            return { stage: 5, status: "Pending Payment Entry" };
+        }
     }
-
-    // Stage 5 Payment Entry
-    if (lot.net_amount_paid) return { stage: 5, status: "Pending Chairman Approval" };
 
     const s4d = await get("SELECT * FROM lot_decisions WHERE lot_id = ? AND stage_number = 4", [lot.lot_id]);
     if (s4d && s4d.decision.toLowerCase() === 'approve') return { stage: 5, status: "Pending Payment Entry" };
@@ -126,29 +138,12 @@ router.get('/contracts', authenticateToken, async (req, res) => {
                 console.error('Error processing contract', row.contract_id, e);
                 return null;
             }
-<<<<<<< HEAD
         }));
 
         const filtered = processed.filter(item => item != null);
         console.log(`Returning ${filtered.length} contracts for user ${req.user?.role || 'unknown'}`);
         console.log('Sample contract statuses:', filtered.slice(0, 3).map(c => ({ id: c.contract_id, status: c.status })));
         res.json(filtered);
-=======
-
-            const item = { ...row, ...statusObj };
-
-            // Filter based on user role
-            let include = true;
-            if (req.user.role === 'Chairman') {
-                include = item.status.includes('Pending Chairman');
-            }
-            // Manager sees all contracts
-
-            return include ? item : null;
-        }));
-
-        res.json(processed.filter(item => item != null));
->>>>>>> f03b738 (Updated frontend and server logic)
     } catch (e) {
         console.error(e);
         res.status(500).json({ error: e.message });
@@ -290,6 +285,18 @@ router.post('/contracts', authenticateToken, async (req, res) => {
 
             await run(`INSERT INTO stage_history (contract_id, lot_id, stage_number, action, performed_by, remarks) VALUES (?, ?, ?, ?, ?, ?)`,
                 [newContractId, newLotId, 4, 'Approve', 2, 'Auto-approved for privileged vendor']);
+        }
+
+        // For non-privileged vendors, create a basic lot entry
+        if (!vendor || !vendor.is_privileged) {
+            const lotResult = await run(`INSERT INTO contract_lots (contract_id, lot_number, arrival_date, sequence_start, sequence_end, no_of_samples)
+                VALUES (?, '-', CURRENT_DATE, '1', '1', 1)`,
+                [newContractId]);
+            
+            newLotId = lotResult.lastID;
+            
+            await run(`INSERT INTO stage_history (contract_id, lot_id, stage_number, action, performed_by, remarks) VALUES (?, ?, ?, ?, ?, ?)`,
+                [newContractId, newLotId, 3, 'Lot Created', entered_by, 'Lot created for non-privileged vendor']);
         }
 
         res.json({ message: "Contract created", contract_id: newContractId, lot_id: newLotId });
@@ -505,8 +512,12 @@ router.post('/contracts/:id/lots/:lotId/stage5', authenticateToken, async (req, 
         await run(`INSERT INTO stage_history (contract_id, lot_id, stage_number, action, performed_by, remarks) VALUES (?, ?, ?, ?, ?, ?)`,
             [id, lotIdInt, 5, 'Payment Entry', req.user.user_id, 'Payment requisition entered for Lot']);
 
-        // Reset Decision if Rollback happened
-        await run("DELETE FROM lot_decisions WHERE lot_id = ? AND stage_number = 5", [lotIdInt]);
+        // Reset Decision if Rollback happened and manager is resubmitting
+        // Only delete decision if it was a rollback and manager is resubmitting
+        const existingDecision = await get("SELECT decision FROM lot_decisions WHERE lot_id = ? AND stage_number = 5", [lotIdInt]);
+        if (existingDecision && existingDecision.decision === 'Modify') {
+            await run("DELETE FROM lot_decisions WHERE lot_id = ? AND stage_number = 5", [lotIdInt]);
+        }
 
         res.json({ message: "Stage 5 Data Saved" });
     } catch (e) {

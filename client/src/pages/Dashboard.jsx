@@ -65,11 +65,10 @@ export default function Dashboard() {
 
         if (filterStatus === 'action_required') {
             if (user?.role === 'Chairman') {
-                // Chairman sees approval tasks AND privileged vendor payment entries
-                matchesStatus = c.status.includes('Pending Chairman Approval') || c.status.includes('Pending Payment Entry');
+                // Chairman only sees items that need their approval
+                matchesStatus = c.status.includes('Pending Chairman Approval');
             } else {
-                // Manager sees everything NOT waiting for Chairman and NOT Closed/Approved
-                // Includes: Pending Entry, Sampling, Rollback, and Rejected (so they can act/see)
+                // Manager sees everything that needs action (not waiting for chairman)
                 matchesStatus = !c.status.includes('Pending Chairman Approval') &&
                     !c.status.includes('Closed') &&
                     !c.status.includes('Approved');
@@ -77,20 +76,24 @@ export default function Dashboard() {
         }
         else if (filterStatus === 'pending') {
             if (user?.role === 'Chairman') {
-                // For Chairman, show approval tasks AND privileged vendor payment entries
-                matchesStatus = c.status.includes('Pending Chairman Approval') || c.status.includes('Pending Payment Entry');
+                // Chairman only sees items pending their approval
+                matchesStatus = c.status.includes('Pending Chairman Approval');
             } else {
-                // Manager sees 'Pending' and 'Rollback' as pending actions
-                matchesStatus = c.status.includes('Pending') || c.status.includes('Rollback');
+                // Manager sees all pending items (including rollbacks)
+                matchesStatus = c.status.includes('Pending') || 
+                    c.status.includes('Rollback') || 
+                    c.status.includes('Rollback Requested') ||
+                    c.status.includes('Rejected');
             }
         }
         else if (filterStatus === 'approved') matchesStatus = c.status.includes('Approved') || c.status === 'Closed';
         else if (filterStatus === 'rejected') matchesStatus = c.status.includes('Rejected'); // Rollback moved to Pending for clarity
 
-        // Chairman should not see rolled back contracts
-        const chairmanHidesRollback = !(user?.role === 'Chairman' && c.status.includes('Rollback'));
+        // Chairman should not see regular rollbacks, but can see rollback requests
+        const chairmanHidesRollback = user?.role === 'Chairman' && c.status.includes('Rollback Requested');
+        if (chairmanHidesRollback) return false;
 
-        return matchesSearch && matchesStatus && matchesStage && chairmanHidesRollback;
+        return matchesSearch && matchesStatus && matchesStage;
     });
 
     // Stats Logic
@@ -99,9 +102,9 @@ export default function Dashboard() {
         // Manager Pending includes Rollbacks, Chairman sees approval tasks AND privileged vendor payment entries
         pending: contracts.filter(c => {
             if (user?.role === 'Chairman') {
-                return c.status.includes('Pending Chairman Approval') || c.status.includes('Pending Payment Entry');
+                return c.status.includes('Pending Chairman Approval');
             }
-            return c.status.includes('Pending') || c.status.includes('Rollback');
+            return c.status.includes('Pending') || c.status.includes('Rollback') || c.status.includes('Rollback Requested');
         }).length,
         completed: contracts.filter(c => c.status === 'Closed' || c.status.includes('Approved')).length,
         attention: contracts.filter(c => c.status.includes('Rollback')).length
@@ -242,9 +245,9 @@ export default function Dashboard() {
                                     </div>
                                     <div className="mt-1">
                                         {/* Show warning for rolled back or rejected contracts */}
-                                        {(c.status.includes('Rollback') || c.status.includes('Rejected')) && (
+                                        {(c.status.includes('Rollback Requested') || c.status.includes('Rollback') || c.status.includes('Rejected')) && (
                                             <span className="text-[10px] font-bold text-rose-600">
-                                                ⚠️ {c.status.includes('Rollback') ? 'Payment Revision Requested' : c.status}
+                                                ⚠️ {c.status.includes('Rollback Requested') || c.status.includes('Rollback') ? 'Payment Revision Requested' : c.status}
                                             </span>
                                         )}
                                     </div>
